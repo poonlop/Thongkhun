@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thongkhun (TK) - Split Bill</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/phosphor-icons"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f7;
+        }
+        .tk-green {
+            background-color: #28a745;
+        }
+        .tk-green-text {
+            color: #28a745;
+        }
+        /* Style for the "Paid" participant card on the summary screen */
+        .paid-card {
+            background-color: #E6F4EA; /* A light green */
+            border-color: #B7E4C7;
+        }
+        .paid-card p, .paid-card span, .paid-card div {
+            color: #081C15; /* Darker text for readability */
+        }
+        .screen, .modal-overlay, #loading-overlay, #toast {
+            display: none;
+        }
+        .screen.active, .modal-overlay.active, #loading-overlay.active {
+            display: flex;
+        }
+        .screen.active {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .screen, .modal {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background-color: rgba(0,0,0,0.5);
+            align-items: flex-end;
+            justify-content: center;
+            z-index: 50;
+        }
+        #loading-overlay {
+            position: fixed;
+            inset: 0;
+            background-color: rgba(0, 0, 0, 0.6);
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #28a745;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .modal {
+            background: white;
+            width: 100%;
+            max-width: 448px;
+            border-top-left-radius: 1.5rem;
+            border-top-right-radius: 1.5rem;
+            padding: 1.5rem;
+            animation: slideUp 0.3s ease-out;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+        }
+        .payment-pane { display: none; }
+        .payment-pane.active { display: block; }
+        #toast {
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #333;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 9999px;
+            z-index: 110;
+            display: none; /* Initially hidden */
+            animation: toast-in 0.5s, toast-out 0.5s 2.5s;
+        }
+        @keyframes toast-in { from { bottom: -50px; opacity: 0; } to { bottom: 2rem; opacity: 1; } }
+        @keyframes toast-out { from { bottom: 2rem; opacity: 1; } to { bottom: -50px; opacity: 0; } }
+        
+        /* Style for the select dropdown placeholder */
+        #payment-method-select.placeholder {
+            color: #9ca3af; /* gray-400 */
+        }
+
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <!-- Loading overlay for async operations -->
+    <div id="loading-overlay"><div class="text-center"><div class="loader mx-auto"></div><p class="text-white mt-4">Processing...</p></div></div>
+    
+    <!-- Toast notification for feedback -->
+    <div id="toast">Link copied to clipboard!</div>
+
+    <!-- Main application container -->
+    <div id="app" class="max-w-md mx-auto h-screen bg-white shadow-lg relative">
+
+        <!-- Screen 1: Start Screen -->
+        <div id="start-screen" class="screen">
+            <div class="flex-grow flex flex-col items-center justify-center p-6 text-center">
+                 <h1 class="text-4xl font-bold mb-2">Thongkhun</h1>
+                 <p class="text-gray-500 mb-8">Effortless Bill Splitting</p>
+            </div>
+             <div class="p-6 bg-white border-t border-gray-200">
+                <button id="start-new-bill-btn" class="w-full tk-green text-white font-bold py-3 px-4 rounded-lg shadow-md">Start a New Bill</button>
+            </div>
+        </div>
+
+        <!-- Screen 2: Create Bill & Host Info (Simplified) -->
+        <div id="create-bill-screen" class="screen">
+             <div class="flex-grow overflow-y-auto p-6">
+                <button class="back-btn text-gray-500 mb-4" data-target="start-screen">&larr; Back</button>
+                <h2 class="text-2xl font-bold mb-6">Start a new bill</h2>
+                
+                <div class="space-y-6">
+                    <!-- Bill Name -->
+                    <div>
+                        <label for="bill-name" class="block text-sm font-bold text-gray-800 mb-1">Bill Name</label>
+                        <input type="text" id="bill-name" class="w-full p-3 border border-gray-300 rounded-lg" placeholder="e.g., Dinner at The Italian Place">
+                    </div>
+
+                    <!-- Host Name -->
+                     <div>
+                        <label for="host-name" class="block text-sm font-bold text-gray-800 mb-1">Your Name (Host)</label>
+                        <input type="text" id="host-name" class="w-full p-3 border border-gray-300 rounded-lg" placeholder="Enter your name">
+                    </div>
+                    
+                    <!-- Payment Info with Dropdown -->
+                    <div>
+                        <label for="payment-method-select" class="block text-sm font-bold text-gray-800 mb-1">Your Payment Info</label>
+                        <select id="payment-method-select" class="w-full p-3 border border-gray-300 rounded-lg mb-4 bg-white placeholder">
+                            <option value="" disabled selected>Select a Payment Method</option>
+                            <option value="bank">Bank Account</option>
+                            <option value="promptpay">PromptPay</option>
+                        </select>
+                        
+                        <div id="bank-account-pane" class="payment-pane space-y-4">
+                            <div><label for="bank-account-name" class="block text-sm font-medium text-gray-700 mb-1">Bank Name</label><input type="text" id="bank-account-name" class="w-full p-3 border border-gray-300 rounded-lg" placeholder="e.g., Kasikorn Bank"></div>
+                            <div><label for="bank-account-number" class="block text-sm font-medium text-gray-700 mb-1">Account Number</label><input type="text" id="bank-account-number" class="w-full p-3 border border-gray-300 rounded-lg" placeholder="123-456-7890"></div>
+                        </div>
+                        <div id="promptpay-pane" class="payment-pane space-y-4">
+                            <div><label for="promptpay-number" class="block text-sm font-medium text-gray-700 mb-1">PromptPay Number</label><input type="text" id="promptpay-number" class="w-full p-3 border border-gray-300 rounded-lg" placeholder="Phone or ID number"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="p-6 bg-white border-t border-gray-200">
+                <p class="text-sm text-gray-500 mb-3 text-center">Next, add items to the bill.</p>
+                <div class="space-y-3">
+                    <button id="upload-receipt-btn" class="w-full tk-green text-white font-bold py-3 px-4 rounded-lg shadow-md"><i class="ph-camera mr-2"></i> Upload Receipt</button>
+                    <input type="file" id="receipt-file-input" class="hidden" accept="image/*">
+                    <button id="manual-entry-btn" class="w-full bg-gray-200 text-gray-700 font-bold py-3 px-4 rounded-lg">Enter Items Manually</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Screen 3: Review Items from Receipt -->
+        <div id="review-items-screen" class="screen">
+            <div class="flex-grow overflow-y-auto p-6">
+                <button class="back-btn text-gray-500 mb-4" data-target="create-bill-screen">&larr; Back</button>
+                <h2 class="text-2xl font-bold mb-2">Review Detected Items</h2>
+                <p class="text-gray-500 mb-6">Review the items below.</p>
+                <div id="detected-items-list" class="mb-4 space-y-3"></div>
+                <button id="add-detected-item-btn" class="w-full border-2 border-dashed border-gray-300 text-gray-500 font-bold py-2 px-4 rounded-lg mb-6 hover:bg-gray-50">+ Add New Item</button>
+                <div class="border-t pt-4 space-y-3">
+                    <div class="flex justify-between items-center">
+                        <div class="flex items-center">
+                            <input id="review-sc-apply-checkbox" type="checkbox" class="h-4 w-4 text-green-600 border-gray-300 rounded focus:ring-green-500 mr-2">
+                            <label for="review-sc-apply-checkbox" class="text-gray-700 text-sm">Apply Service Charge</label>
+                        </div>
+                        <input type="number" id="review-sc" class="w-28 p-2 border border-gray-300 rounded-lg text-right" placeholder="0.00" value="0">
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <div class="flex items-center">
+                            <input id="review-vat-apply-checkbox" type="checkbox" class="h-4 w-4 text-green-600 border-gray-300 rounded focus:ring-green-500 mr-2">
+                            <label for="review-vat-apply-checkbox" class="text-gray-700 text-sm">Apply VAT</label>
+                        </div>
+                        <input type="number" id="review-vat" class="w-28 p-2 border border-gray-300 rounded-lg text-right" placeholder="0.00" value="0">
+                    </div>
+                    <div class="flex justify-between items-center text-xl font-bold border-t pt-3 mt-2"><span>Total</span><span id="review-total">฿0.00</span></div>
+                </div>
+            </div>
+            <div class="p-6 bg-white border-t border-gray-200">
+                <button id="create-bill-from-review-btn" class="w-full tk-green text-white font-bold py-3 px-4 rounded-lg shadow-md">Create Bill</button>
+            </div>
+        </div>
+
+        <!-- Screen 4: Manual Item Entry -->
+        <div id="manual-entry-screen" class="screen">
+            <div class="flex-grow overflow-y-auto p-6">
+                <button class="back-btn text-gray-500 mb-4" data-target="create-bill-screen">&larr; Back</button>
+                <h2 id="manual-bill-name-display" class="text-2xl font-bold mb-4"></h2>
+                <div id="manual-items-list" class="mb-4 space-y-3"></div>
+                <button id="add-manual-item-btn" class="w-full border-2 border-dashed border-gray-300 text-gray-500 font-bold py-2 px-4 rounded-lg mb-6 hover:bg-gray-50">+ Add Item</button>
+                <div class="border-t pt-4 space-y-3">
+                    <div class="flex justify-between items-center">
+                        <label for="manual-sc-percent" class="text-gray-700 flex items-center">
+                            <input type="checkbox" id="manual-sc-checkbox" class="h-4 w-4 mr-2 text-green-600 border-gray-300 rounded focus:ring-green-500" checked>
+                            Service Charge (%)
+                        </label>
+                        <input type="number" id="manual-sc-percent" value="10" class="w-24 p-2 border border-gray-300 rounded-lg text-right">
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <label for="manual-vat-percent" class="text-gray-700 flex items-center">
+                            <input type="checkbox" id="manual-vat-checkbox" class="h-4 w-4 mr-2 text-green-600 border-gray-300 rounded focus:ring-green-500" checked>
+                            VAT (%)
+                        </label>
+                        <input type="number" id="manual-vat-percent" value="7" class="w-24 p-2 border border-gray-300 rounded-lg text-right">
+                    </div>
+                    <div class="flex justify-between items-center text-xl font-bold border-t pt-3 mt-2">
+                        <span>Total</span>
+                        <span id="manual-total-display">฿0.00</span>
+                    </div>
+                </div>
+            </div>
+            <div class="p-6 bg-white border-t border-gray-200">
+                <button id="create-bill-from-manual-btn" class="w-full tk-green text-white font-bold py-3 px-4 rounded-lg shadow-md">Create Bill</button>
+            </div>
+        </div>
+
+        <!-- Screen 5: Join Bill (for participants) -->
+        <div id="join-screen" class="screen">
+            <div class="flex-grow overflow-y-auto p-6">
+                <h2 class="text-2xl font-bold mb-2 text-center">Split Bill</h2>
+                <p class="text-gray-500 mb-4 text-center">Enter your name to join</p>
+                <input type="text" id="participant-name-join" class="w-full p-3 border border-gray-300 rounded-lg mb-6" placeholder="Your Name">
+                <div class="border rounded-lg p-4 mb-6">
+                    <h3 id="join-bill-name" class="font-bold text-lg mb-2"></h3>
+                    <div id="join-summary-list" class="space-y-1 text-gray-600"></div>
+                </div>
+            </div>
+             <div class="p-6 bg-white border-t border-gray-200">
+                <button id="join-bill-action-btn" class="w-full tk-green text-white font-bold py-3 px-4 rounded-lg shadow-md">Join Bill</button>
+            </div>
+        </div>
+
+        <!-- Screen 6: Item Selection (main collaborative screen) -->
+        <div id="item-selection-screen" class="screen">
+            <div class="flex-grow overflow-y-auto p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 id="selection-bill-name" class="text-2xl font-bold"></h2>
+                    <button id="share-selection-screen-btn" class="tk-green-text font-semibold flex items-center gap-1 p-2 rounded-lg hover:bg-green-50"><i class="ph ph-share-network text-xl"></i><span>Share</span></button>
+                </div>
+                <h3 class="font-bold text-lg mb-2">Participants</h3>
+                <div id="participants-list" class="flex flex-wrap items-start gap-2 mb-6"></div>
+                <h3 class="font-bold text-lg mb-2">Items</h3>
+                <div id="bill-items-list" class="space-y-3 mb-6"></div>
+                <button id="add-missing-item-btn" class="w-full border-2 border-dashed border-gray-300 text-gray-500 font-bold py-2 px-4 rounded-lg mb-6 hover:bg-gray-50">+ Add Item</button>
+            </div>
+            <div class="p-6 bg-white border-t border-gray-200">
+                <button id="finalize-bill-btn" class="w-full tk-green text-white font-bold py-3 px-4 rounded-lg">Finalize the bill</button>
+            </div>
+        </div>
+
+        <!-- Screen 7: Summary Screen -->
+        <div id="summary-screen" class="screen">
+             <div class="flex-grow overflow-y-auto p-6">
+                <h2 class="text-2xl font-bold mb-4">Summary</h2>
+                <div id="summary-list" class="space-y-4 mb-6"></div>
+            </div>
+            <div id="host-payment-info" class="p-6 bg-white border-t border-gray-200 space-y-4"></div>
+        </div>
+    </div>
+    
+    <!-- Modals -->
+    <div id="item-modal" class="modal-overlay"><div class="modal"><h3 id="modal-item-name" class="text-xl font-bold mb-4 text-center"></h3><div id="modal-participants-list" class="space-y-3"></div><div class="flex gap-4 mt-6"><button id="modal-cancel-btn" class="w-full bg-gray-200 text-gray-700 font-bold py-3 px-4 rounded-lg">Cancel</button><button id="modal-next-btn" class="w-full tk-green text-white font-bold py-3 px-4 rounded-lg">Next</button></div></div></div>
+    
+    <div id="add-participant-modal" class="modal-overlay"><div class="modal"><h3 class="text-xl font-bold mb-4 text-center">Add New Participant</h3><div class="mb-4"><label for="new-participant-name" class="block text-sm font-medium text-gray-700 mb-1">Participant's Name</label><input type="text" id="new-participant-name" class="w-full p-3 border border-gray-300 rounded-lg" placeholder="Enter name"><p id="participant-error-msg" class="text-red-500 text-sm mt-1 h-4"></p></div><div class="flex gap-4 mt-2"><button id="modal-cancel-add-participant-btn" class="w-full bg-gray-200 text-gray-700 font-bold py-3 px-4 rounded-lg">Cancel</button><button id="modal-confirm-add-participant-btn" class="w-full tk-green text-white font-bold py-3 px-4 rounded-lg">Add</button></div></div></div>
+
+    <div id="add-item-modal" class="modal-overlay"><div class="modal"><h3 class="text-xl font-bold mb-4 text-center">Add New Item</h3><div class="space-y-4"><label class="block"><span class="text-gray-700">Item Name</span><input type="text" id="new-item-name" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg" placeholder="e.g., Fried Rice"></label><label class="block"><span class="text-gray-700">Price</span><input type="number" id="new-item-price" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg" placeholder="0.00"></label><p id="item-error-msg" class="text-red-500 text-sm h-4"></p></div><div class="flex gap-4 mt-4"><button id="modal-cancel-add-item-btn" class="w-full bg-gray-200 text-gray-700 font-bold py-3 px-4 rounded-lg">Cancel</button><button id="modal-confirm-add-item-btn" class="w-full tk-green text-white font-bold py-3 px-4 rounded-lg">Add Item</button></div></div></div>
+
+    <script type="module">
+        // Import Firebase modules for database and authentication
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, onSnapshot, collection, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Global State ---
+        let billData = { billName: '', items: [], charges: {}, hostInfo: {}, participants: [], entryMethod: null };
+        let currentItemName = null;
+        let db, auth, currentBillId, unsubscribe;
+        
+        // Use environment variables for app ID and Firestore path
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const billsCollectionPath = `artifacts/${appId}/public/data/bills`;
+
+
+        // --- DOM Element References ---
+        const { body } = document;
+        const app = document.getElementById('app');
+        const toast = document.getElementById('toast');
+        const reviewScreen = document.getElementById('review-items-screen');
+        const manualEntryScreen = document.getElementById('manual-entry-screen');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const itemModal = document.getElementById('item-modal');
+        const addParticipantModal = document.getElementById('add-participant-modal');
+        const addItemModal = document.getElementById('add-item-modal');
+        const createBillScreen = document.getElementById('create-bill-screen');
+
+        // --- UI Helper Functions ---
+        function showScreen(screenId) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); document.getElementById(screenId)?.classList.add('active'); app.scrollTop = 0; }
+        function showLoading(show, text = 'Processing...') { 
+            loadingOverlay.querySelector('p').textContent = text;
+            loadingOverlay.classList.toggle('active', show); 
+        }
+        function showToast(message) { toast.textContent = message; toast.style.display = 'block'; setTimeout(() => { toast.style.display = 'none'; }, 3000); }
+        function hideAllModals() { itemModal.classList.remove('active'); addParticipantModal.classList.remove('active'); addItemModal.classList.remove('active'); }
+
+        function updateReviewTotal() {
+            let itemsTotal = Array.from(reviewScreen.querySelectorAll('#detected-items-list input[type="number"]')).reduce((sum, input) => sum + (parseFloat(input.value) || 0), 0);
+            let grandTotal = itemsTotal;
+            if (document.getElementById('review-sc-apply-checkbox').checked) {
+                grandTotal += parseFloat(document.getElementById('review-sc').value) || 0;
+            }
+            if (document.getElementById('review-vat-apply-checkbox').checked) {
+                grandTotal += parseFloat(document.getElementById('review-vat').value) || 0;
+            }
+            document.getElementById('review-total').textContent = `฿${grandTotal.toFixed(2)}`;
+        }
+        
+        function updateManualTotal() {
+            let itemsTotal = Array.from(manualEntryScreen.querySelectorAll('#manual-items-list input[type="number"]')).reduce((sum, input) => sum + (parseFloat(input.value) || 0), 0);
+            
+            let scAmount = 0;
+            if (document.getElementById('manual-sc-checkbox').checked) {
+                const scPercent = parseFloat(document.getElementById('manual-sc-percent').value) || 0;
+                scAmount = itemsTotal * (scPercent / 100);
+            }
+
+            let vatAmount = 0;
+            if (document.getElementById('manual-vat-checkbox').checked) {
+                const vatPercent = parseFloat(document.getElementById('manual-vat-percent').value) || 0;
+                vatAmount = itemsTotal * (vatPercent / 100);
+            }
+
+            let grandTotal = itemsTotal + scAmount + vatAmount;
+            document.getElementById('manual-total-display').textContent = `฿${grandTotal.toFixed(2)}`;
+        }
+        
+        // --- UI Rendering Functions ---
+        function populateParticipantsList() {
+            const listEl = document.getElementById('participants-list');
+            listEl.innerHTML = '';
+            const myName = localStorage.getItem(`tk-name-${currentBillId}`);
+            const amIHost = billData.participants.find(p => p.isHost)?.name === myName;
+
+            billData.participants.forEach(p => {
+                const initial = p.name.charAt(0).toUpperCase();
+                listEl.innerHTML += `<div class="text-center"><div class="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center font-bold text-gray-600">${initial}</div><p class="text-xs mt-1 w-10 truncate">${p.name}</p></div>`;
+            });
+            if (amIHost) {
+                listEl.innerHTML += `<div class="text-center"><button id="add-participant-btn" title="Add Participant" class="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center text-xl text-gray-600">+</button></div>`;
+            }
+        }
+
+        function populateItemSelectionScreen() {
+            document.getElementById('selection-bill-name').textContent = billData.billName;
+            populateParticipantsList();
+            const itemsListEl = document.getElementById('bill-items-list');
+            itemsListEl.innerHTML = '';
+            billData.items.forEach(item => {
+                const selectedAvatars = (item.selectedBy || []).map(name => `<img src="https://placehold.co/24x24/E2E8F0/4A5568?text=${name.charAt(0).toUpperCase()}" class="rounded-full border-2 border-white" title="${name}">`).join('');
+                itemsListEl.innerHTML += `
+                    <div class="item-select-row flex justify-between items-center p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors duration-200" data-item-name="${item.name}">
+                        <div>
+                            <p class="font-semibold">${item.name}</p>
+                            <p class="text-sm text-gray-500">฿${item.price.toFixed(2)}</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <div class="flex -space-x-3 overflow-hidden pr-2">${selectedAvatars}</div>
+                            <i class="ph ph-plus-circle text-xl tk-green-text"></i>
+                        </div>
+                    </div>`;
+            });
+        }
+
+        function showItemSelectionModal(itemName) {
+            currentItemName = itemName;
+            const item = billData.items.find(i => i.name === itemName);
+            if (!item) return;
+            document.getElementById('modal-item-name').textContent = `Who had ${item.name}?`;
+            const listEl = document.getElementById('modal-participants-list');
+            listEl.innerHTML = billData.participants.map(p => {
+                const isChecked = (item.selectedBy || []).includes(p.name);
+                return `<label class="flex items-center p-3 border rounded-lg"><input type="checkbox" class="h-5 w-5 rounded mr-4 participant-checkbox" value="${p.name}" ${isChecked ? 'checked' : ''}><img src="https://placehold.co/40x40/E2E8F0/4A5568?text=${p.name.charAt(0).toUpperCase()}" class="rounded-full mr-3"><span>${p.name}</span></label>`
+            }).join('');
+            listEl.innerHTML += `<label class="flex items-center p-3 border rounded-lg"><input type="checkbox" id="shared-checkbox" class="h-5 w-5 rounded mr-4"><i class="ph-users text-2xl mr-3"></i><span>Shared by All</span></label>`;
+            itemModal.classList.add('active');
+        }
+        
+        function showAddParticipantModal() {
+            document.getElementById('new-participant-name').value = '';
+            document.getElementById('participant-error-msg').textContent = '';
+            addParticipantModal.classList.add('active');
+            document.getElementById('new-participant-name').focus();
+        }
+
+        function showAddItemModal() {
+            document.getElementById('new-item-name').value = '';
+            document.getElementById('new-item-price').value = '';
+            document.getElementById('item-error-msg').textContent = '';
+            addItemModal.classList.add('active');
+            document.getElementById('new-item-name').focus();
+        }
+
+        function populateSummaryScreen() {
+            const summaryListEl = document.getElementById('summary-list');
+            summaryListEl.innerHTML = '';
+            
+            const myName = localStorage.getItem(`tk-name-${currentBillId}`);
+            const amIHost = billData.participants.find(p => p.isHost)?.name === myName;
+
+            billData.participants.forEach(p => {
+                let breakdownHTML = '';
+                billData.items.forEach(item => {
+                    if (item.selectedBy?.includes(p.name)) {
+                        const costPerPerson = item.price / item.selectedBy.length;
+                        breakdownHTML += `<div class="flex justify-between"><span>${item.name} ${item.selectedBy.length > 1 ? `(1/${item.selectedBy.length})` : ''}</span><span>฿${costPerPerson.toFixed(2)}</span></div>`;
+                    }
+                });
+                const scShare = p.scShare || 0;
+                const vatShare = p.vatShare || 0;
+                if (scShare > 0) breakdownHTML += `<div class="flex justify-between"><span>Service Charge</span><span>฿${scShare.toFixed(2)}</span></div>`;
+                if (vatShare > 0) breakdownHTML += `<div class="flex justify-between"><span>VAT</span><span>฿${vatShare.toFixed(2)}</span></div>`;
+                
+                summaryListEl.innerHTML += `<div class="p-4 border rounded-lg ${p.paid ? 'paid-card' : ''}"><div class="flex justify-between items-start"><p class="font-bold text-lg">${p.name} ${p.paid ? '✅' : ''} ${p.isHost ? '(Host)' : ''}</p><p class="text-lg font-bold ${p.paid ? '' : 'tk-green-text'}">฿${p.total.toFixed(2)}</p></div><div class="mt-2 pt-2 border-t text-sm text-gray-600 space-y-1">${breakdownHTML || '<p>No items selected.</p>'}</div>${!p.isHost && !p.paid && amIHost ? `<div class="text-right mt-2"><button class="mark-paid-btn text-sm tk-green-text font-semibold" data-name="${p.name}">Mark as Paid</button></div>` : ''}${!p.isHost && p.paid && amIHost ? `<div class="text-right mt-2"><button class="mark-paid-btn text-sm text-red-500 font-semibold" data-name="${p.name}">Mark as Unpaid</button></div>` : ''}</div>`;
+            });
+
+            const hostPaymentEl = document.getElementById('host-payment-info');
+            let copyValue = '', paymentTitle = '', paymentDetails = [];
+            if (billData.hostInfo.paymentMethod === 'bank' && billData.hostInfo.accountNumber) {
+                paymentTitle = 'Bank Account';
+                if(billData.hostInfo.bankName) paymentDetails.push(`Bank Name: ${billData.hostInfo.bankName}`);
+                paymentDetails.push(`Account Number: ${billData.hostInfo.accountNumber}`);
+                copyValue = billData.hostInfo.accountNumber;
+            } else if (billData.hostInfo.paymentMethod === 'promptpay' && billData.hostInfo.promptPay) {
+                paymentTitle = 'PromptPay';
+                paymentDetails.push(`Account Name: ${billData.hostInfo.name}`);
+                paymentDetails.push(`Account Number: ${billData.hostInfo.promptPay}`);
+                copyValue = billData.hostInfo.promptPay;
+            }
+            
+            let buttonsHTML = `<button id="start-another-bill-btn" class="w-full bg-gray-200 text-gray-700 font-bold py-3 px-4 rounded-lg">Start Another Bill</button>`;
+            if (amIHost) {
+                 buttonsHTML += `<button id="go-back-edit-btn" class="mt-2 w-full border-2 border-gray-300 text-gray-600 font-bold py-3 px-4 rounded-lg">Go Back & Edit</button>`;
+            }
+
+            if(paymentTitle) {
+                hostPaymentEl.innerHTML = `<h2 class="text-2xl font-bold mb-4">Pay who</h2><div class="flex items-center justify-between bg-gray-50 p-4 rounded-lg"><div class="flex items-center gap-4"><div class="bg-white p-3 rounded-lg shadow-sm"><i class="ph ph-bank text-2xl text-gray-600"></i></div><div><h4 class="font-semibold">${paymentTitle}</h4>${paymentDetails.map(detail => `<p class="text-sm text-gray-500">${detail}</p>`).join('')}</div></div><button class="copy-payment-btn" data-copy-value="${copyValue}"><i class="ph ph-copy text-2xl text-gray-500"></i></button></div><div class="mt-4 space-y-2">${buttonsHTML}</div>`;
+            } else {
+                hostPaymentEl.innerHTML = `<div class="mt-4 space-y-2">${buttonsHTML}</div>`;
+            }
+        }
+        
+        // --- Data Handling ---
+        function saveBillAndHostInfo() {
+            const billName = document.getElementById('bill-name').value.trim();
+            const hostName = document.getElementById('host-name').value.trim();
+            const paymentMethod = document.getElementById('payment-method-select').value;
+
+            if (!billName || !hostName) {
+                showToast("Please enter a Bill Name and Your Name.");
+                return false;
+            }
+            if (!paymentMethod) {
+                showToast("Please select a payment method.");
+                return false;
+            }
+
+            billData.billName = billName;
+            billData.hostInfo = { 
+                name: hostName, 
+                bankName: document.getElementById('bank-account-name').value.trim(),
+                accountNumber: document.getElementById('bank-account-number').value.trim(), 
+                promptPay: document.getElementById('promptpay-number').value.trim(),
+                paymentMethod: paymentMethod
+            };
+            billData.participants = [{ name: hostName, isHost: true }];
+            return true;
+        }
+
+        async function createBillInFirestore() {
+            showLoading(true, 'Creating bill...');
+            const newBill = { ...billData, createdAt: serverTimestamp() };
+            try {
+                const docRef = await addDoc(collection(db, billsCollectionPath), newBill);
+                currentBillId = docRef.id;
+                localStorage.setItem(`tk-name-${currentBillId}`, billData.hostInfo.name);
+                window.location.hash = `bill=${currentBillId}`;
+            } catch (error) {
+                console.error("Error creating bill:", error);
+                showToast("Could not create bill. Please try again.");
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // --- Receipt Processing with Gemini API ---
+        async function processReceipt(imageFile) {
+            showLoading(true, 'Analyzing your receipt...');
+            billData.entryMethod = 'review';
+            const base64ImageData = await toBase64(imageFile);
+            const payload = {
+                contents: [{ role: "user", parts: [
+                    { text: `Extract line items, prices, VAT, and Service Charge from the receipt.` }, 
+                    { inlineData: { mimeType: imageFile.type, data: base64ImageData } }
+                ] }],
+                generationConfig: { 
+                    responseMimeType: "application/json", 
+                    responseSchema: { 
+                        type: "OBJECT", 
+                        properties: { 
+                            items: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, price: { type: "NUMBER" } }, required: ["name", "price"] } }, 
+                            charges: { type: "OBJECT", properties: { vat: { type: "NUMBER" }, serviceCharge: { type: "NUMBER" } }, required: ["vat", "serviceCharge"] } 
+                        }, 
+                        required: ["items", "charges"] 
+                    } 
+                }
+            };
+            const apiKey = ""; // API key will be provided by the environment
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+            try {
+                const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                const result = await response.json();
+                if (result.candidates?.[0]?.content?.parts?.[0]) {
+                    const data = JSON.parse(result.candidates[0].content.parts[0].text);
+                    populateReviewScreen(data); showScreen('review-items-screen');
+                } else { 
+                    console.error("Unexpected API response structure:", result);
+                    throw new Error("Failed to parse receipt data."); 
+                }
+            } catch (error) { console.error("Error processing receipt:", error); showToast("Sorry, we couldn't read the receipt."); } finally { showLoading(false); }
+        }
+        function toBase64(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.readAsDataURL(file); reader.onload = () => resolve(reader.result.split(',')[1]); reader.onerror = error => reject(error); }); }
+        
+        function populateReviewScreen(data) {
+            const itemListEl = document.getElementById('detected-items-list');
+            itemListEl.innerHTML = '';
+            if (data.items?.length > 0) data.items.forEach(item => createItemInput(item.name || '', item.price || 0.00));
+            else itemListEl.innerHTML = '<p class="text-gray-500 text-center">No items detected.</p>';
+            
+            const serviceCharge = data.charges.serviceCharge || 0;
+            const vat = data.charges.vat || 0;
+            document.getElementById('review-sc').value = serviceCharge;
+            document.getElementById('review-vat').value = vat;
+            document.getElementById('review-sc-apply-checkbox').checked = serviceCharge > 0;
+            document.getElementById('review-vat-apply-checkbox').checked = vat > 0;
+            updateReviewTotal();
+        }
+
+        function createItemInput(name, price) {
+            const list = document.getElementById('detected-items-list');
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'flex items-center space-x-2';
+            itemDiv.innerHTML = `<input type="text" value="${name}" class="flex-grow p-3 border border-gray-300 rounded-lg" placeholder="Item Name"><input type="number" value="${price.toFixed(2)}" class="w-24 p-3 border border-gray-300 rounded-lg text-right"><button class="text-red-500 p-2 text-2xl" onclick="this.parentElement.remove(); document.getElementById('review-items-screen').dispatchEvent(new Event('input'))">&times;</button>`;
+            list.querySelector('p')?.remove(); list.appendChild(itemDiv);
+        }
+         function createManualItemInput(name, price) {
+            const list = document.getElementById('manual-items-list');
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'flex items-center space-x-2';
+            itemDiv.innerHTML = `<input type="text" value="${name}" class="flex-grow p-3 border border-gray-300 rounded-lg manual-item-name" placeholder="Item Name"><input type="number" value="${price.toFixed(2)}" class="w-24 p-3 border border-gray-300 rounded-lg text-right manual-item-price" placeholder="Price"><button class="text-red-500 p-2 text-2xl" onclick="this.parentElement.remove(); document.getElementById('manual-entry-screen').dispatchEvent(new Event('input'))">&times;</button>`;
+            list.appendChild(itemDiv);
+        }
+        function copyToClipboard(text, message) { const ta = document.createElement('textarea'); ta.value = text; body.appendChild(ta); ta.select(); document.execCommand('copy'); body.removeChild(ta); showToast(message); }
+
+        // --- Event Delegation for Clicks ---
+        body.addEventListener('click', async e => {
+            const target = e.target;
+            const closest = (selector) => target.closest(selector);
+
+            // Navigation
+            if (closest('.back-btn')) { showScreen(closest('.back-btn').dataset.target); }
+            if (closest('#start-new-bill-btn')) { showScreen('create-bill-screen'); }
+            
+            // Bill Creation Flow
+            if (closest('#upload-receipt-btn')) { if (saveBillAndHostInfo()) document.getElementById('receipt-file-input').click(); }
+            if (closest('#manual-entry-btn')) {
+                if (saveBillAndHostInfo()) {
+                    billData.entryMethod = 'manual';
+                    document.getElementById('manual-bill-name-display').textContent = billData.billName;
+                    document.getElementById('manual-items-list').innerHTML = '';
+                    createManualItemInput('', 0.00); 
+                    updateManualTotal();
+                    showScreen('manual-entry-screen');
+                }
+            }
+            if (closest('#create-bill-from-review-btn')) {
+                billData.items = Array.from(reviewScreen.querySelectorAll('#detected-items-list .flex')).map(el => ({ name: el.querySelector('input[type="text"]').value, price: parseFloat(el.querySelector('input[type="number"]').value), selectedBy: [] })).filter(item => item.name && !isNaN(item.price));
+                billData.charges = { sc: parseFloat(document.getElementById('review-sc').value) || 0, vat: parseFloat(document.getElementById('review-vat').value) || 0, applySc: document.getElementById('review-sc-apply-checkbox').checked, applyVat: document.getElementById('review-vat-apply-checkbox').checked };
+                await createBillInFirestore();
+            }
+            if (closest('#create-bill-from-manual-btn')) {
+                 billData.items = Array.from(manualEntryScreen.querySelectorAll('#manual-items-list .flex')).map(el => ({ name: el.querySelector('.manual-item-name').value, price: parseFloat(el.querySelector('.manual-item-price').value), selectedBy: [] })).filter(item => item.name && !isNaN(item.price));
+                 const itemsTotal = billData.items.reduce((sum, item) => sum + item.price, 0);
+                 const applySc = document.getElementById('manual-sc-checkbox').checked;
+                 const applyVat = document.getElementById('manual-vat-checkbox').checked;
+                 const scPercent = parseFloat(document.getElementById('manual-sc-percent').value) || 0;
+                 const vatPercent = parseFloat(document.getElementById('manual-vat-percent').value) || 0;
+                 billData.charges = { sc: applySc ? itemsTotal * (scPercent / 100) : 0, vat: applyVat ? itemsTotal * (vatPercent / 100) : 0, applySc, applyVat };
+                 await createBillInFirestore();
+            }
+            
+            // In-Bill Actions
+            if (closest('#join-bill-action-btn')) {
+                const name = document.getElementById('participant-name-join').value.trim();
+                if (name && !billData.participants.some(p => p.name.toLowerCase() === name.toLowerCase())) {
+                    await updateDoc(doc(db, billsCollectionPath, currentBillId), { participants: [...billData.participants, { name, isHost: false }] });
+                    localStorage.setItem(`tk-name-${currentBillId}`, name);
+                } else if (name) { showToast('Name already taken.'); }
+            }
+            if (closest('.item-select-row')) { showItemSelectionModal(closest('.item-select-row').dataset.itemName); }
+            if (closest('#share-selection-screen-btn')) { copyToClipboard(window.location.href, 'Link copied!'); }
+            if (closest('#add-participant-btn')) { showAddParticipantModal(); }
+            if (closest('#add-missing-item-btn') || closest('#add-detected-item-btn')) { showAddItemModal(); }
+            if (closest('#add-manual-item-btn')) { createManualItemInput('', 0.00); updateManualTotal(); }
+
+            // Finalize
+            if (closest('#finalize-bill-btn')) {
+                if (billData.items.some(item => !item.selectedBy || item.selectedBy.length === 0)) { showToast("Please assign all items."); return; }
+                billData.participants.forEach(p => { p.subtotal = 0; p.paid = false; });
+                billData.items.forEach(item => { if (item.selectedBy?.length > 0) { const costPer = item.price / item.selectedBy.length; item.selectedBy.forEach(pName => { const p = billData.participants.find(p => p.name === pName); if(p) p.subtotal += costPer; }); } });
+                const grandSubtotal = billData.participants.reduce((sum, p) => sum + p.subtotal, 0);
+                billData.participants.forEach(p => { const proportion = grandSubtotal > 0 ? p.subtotal / grandSubtotal : 1 / billData.participants.length; p.scShare = (billData.charges.applySc ? billData.charges.sc : 0) * proportion; p.vatShare = (billData.charges.applyVat ? billData.charges.vat : 0) * proportion; p.total = p.subtotal + p.scShare + p.vatShare; });
+                await updateDoc(doc(db, billsCollectionPath, currentBillId), { participants: billData.participants, finalized: true });
+            }
+            // Modals
+            if (closest('#modal-cancel-btn') || closest('#modal-cancel-add-participant-btn') || closest('#modal-cancel-add-item-btn')) { hideAllModals(); }
+            if (closest('#modal-next-btn')) {
+                const item = billData.items.find(i => i.name === currentItemName);
+                if (item) item.selectedBy = Array.from(itemModal.querySelectorAll('.participant-checkbox:checked')).map(cb => cb.value);
+                hideAllModals(); 
+                await updateDoc(doc(db, billsCollectionPath, currentBillId), { items: billData.items });
+            }
+            if (closest('#shared-checkbox')) { itemModal.querySelectorAll('.participant-checkbox').forEach(cb => cb.checked = target.checked); }
+            if (closest('#modal-confirm-add-participant-btn')) {
+                const name = document.getElementById('new-participant-name').value.trim();
+                const errorMsg = document.getElementById('participant-error-msg');
+                if (!name) { errorMsg.textContent = 'Please enter a name.'; }
+                else if (billData.participants.some(p => p.name.toLowerCase() === name.toLowerCase())) { errorMsg.textContent = 'This name is already in use.'; }
+                else { errorMsg.textContent = ''; await updateDoc(doc(db, billsCollectionPath, currentBillId), { participants: [...billData.participants, { name, isHost: false }] }); hideAllModals(); }
+            }
+            if (closest('#modal-confirm-add-item-btn')) {
+                const name = document.getElementById('new-item-name').value.trim(), price = parseFloat(document.getElementById('new-item-price').value), errorMsg = document.getElementById('item-error-msg');
+                if (!name || isNaN(price) || price <= 0) { errorMsg.textContent = 'Please enter a valid name and price.'; }
+                else { errorMsg.textContent = ''; await updateDoc(doc(db, billsCollectionPath, currentBillId), { items: [...billData.items, { name, price, selectedBy: [] }] }); hideAllModals(); }
+            }
+            // Summary Screen
+            if(closest('.mark-paid-btn')) { 
+                const p = billData.participants.find(p => p.name === closest('.mark-paid-btn').dataset.name); 
+                if(p) p.paid = !p.paid; 
+                await updateDoc(doc(db, billsCollectionPath, currentBillId), { participants: billData.participants });
+            }
+            if (closest('#start-another-bill-btn')) { window.location.hash = ''; window.location.reload(); }
+            if (closest('.copy-payment-btn')) { copyToClipboard(closest('.copy-payment-btn').dataset.copyValue, 'Payment info copied!'); }
+            if (closest('#go-back-edit-btn')) { await updateDoc(doc(db, billsCollectionPath, currentBillId), { finalized: false }); }
+        });
+
+        // --- Input Listeners for Real-time Calculation & UI Changes ---
+        reviewScreen.addEventListener('input', (e) => { if (e.target.matches('input')) updateReviewTotal(); });
+        manualEntryScreen.addEventListener('input', (e) => { if (e.target.matches('input')) updateManualTotal(); });
+        document.getElementById('receipt-file-input').addEventListener('change', (event) => { const file = event.target.files[0]; if (file) processReceipt(file); event.target.value = null; });
+        createBillScreen.addEventListener('change', e => {
+            if (e.target.id === 'payment-method-select') {
+                document.getElementById('bank-account-pane').classList.toggle('active', e.target.value === 'bank');
+                document.getElementById('promptpay-pane').classList.toggle('active', e.target.value === 'promptpay');
+                e.target.classList.remove('placeholder');
+            }
+        });
+
+
+        // --- Firebase & Routing Logic ---
+        async function handleRouting() {
+            if (unsubscribe) unsubscribe(); // Detach old listener
+            const hash = window.location.hash.replace('#bill=', '');
+            if (hash) {
+                currentBillId = hash;
+                const billRef = doc(db, billsCollectionPath, currentBillId);
+                unsubscribe = onSnapshot(billRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        billData = docSnap.data();
+                        if (billData.finalized) {
+                            populateSummaryScreen();
+                            showScreen('summary-screen');
+                        } else {
+                            const myName = localStorage.getItem(`tk-name-${currentBillId}`);
+                            if (billData.participants.some(p => p.name === myName)) {
+                                populateItemSelectionScreen();
+                                showScreen('item-selection-screen');
+                            } else {
+                                document.getElementById('join-bill-name').textContent = billData.billName;
+                                document.getElementById('join-summary-list').innerHTML = billData.items.map(item => `<div class="flex justify-between"><span>${item.name}</span><span>฿${item.price.toFixed(2)}</span></div>`).join('');
+                                showScreen('join-screen');
+                            }
+                        }
+                    } else {
+                        showToast("Bill not found.");
+                        window.location.hash = '';
+                        showScreen('start-screen');
+                    }
+                });
+            } else {
+                showScreen('start-screen');
+            }
+        }
+        
+        window.addEventListener('hashchange', handleRouting);
+
+        // --- Initial Application Load ---
+        (async () => {
+            try {
+                // Use the firebase config provided by the environment
+                const firebaseConfig = JSON.parse(__firebase_config);
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Listen for authentication state changes
+                onAuthStateChanged(auth, user => {
+                    if (user) {
+                        handleRouting();
+                    } else {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                           signInWithCustomToken(auth, __initial_auth_token).catch(err => {
+                               console.error("Custom token sign-in failed, trying anonymous.", err);
+                               signInAnonymously(auth);
+                           });
+                        } else {
+                           signInAnonymously(auth);
+                        }
+                    }
+                });
+            } catch (e) {
+                console.error("Firebase initialization failed:", e);
+                showToast("Offline mode: Sharing is disabled.");
+                showScreen('start-screen'); // Fallback to start screen if Firebase fails
+            }
+        })();
+    </script>
+</body>
+</html>
